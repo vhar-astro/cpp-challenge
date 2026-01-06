@@ -1,0 +1,57 @@
+name: publish-rc
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize]
+
+jobs:
+  read-version:
+    if: contains(github.event.pull_request.labels.*.name, 'publish')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - id: version
+        run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+  guard-stable:
+    needs: read-version
+    if: contains(github.event.pull_request.labels.*.name, 'publish')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Conan
+        uses: turtlebrowser/get-conan@v1.2
+      - name: Ensure release not already published
+        env:
+          VERSION: ${{ needs.read-version.outputs.version }}
+        run: |
+          conan remote add conan-stable "${{ secrets.CONAN_STABLE_URL }}" --force
+          conan remote login conan-stable "${{ secrets.CONAN_USERNAME }}" -p "${{ secrets.CONAN_PASSWORD }}"
+          if conan search "mylib/${VERSION}" -r conan-stable; then
+            echo "Version already exists in conan-stable"
+            exit 1
+          else
+            echo "Version ${VERSION} not found in conan-stable, safe to build RC."
+          fi
+
+  build-rc:
+    needs: [guard-stable, read-version]
+    if: contains(github.event.pull_request.labels.*.name, 'publish')
+    strategy:
+      matrix:
+        profile: [linux-gcc, macos-clang, windows-msvc]
+    uses: my-org/cpp-shared-workflows/.github/workflows/publish-conan.yml@main
+    with:
+      package-version: ${{ needs.read-version.outputs.version }}
+      package-suffix: ${{ format('-dev-{0}', github.event.pull_request.head.sha[0:7]) }}
+      profile: ${{ matrix.profile }}
+      conan-remote: ${{ secrets.CONAN_RC_URL }}
+      upload-remote-name: conan-rc
+      run-tests: false
+    secrets:
+      conan-username: ${{ secrets.CONAN_USERNAME }}
+      conan-password: ${{ secrets.CONAN_PASSWORD }}

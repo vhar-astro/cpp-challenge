@@ -1,0 +1,29 @@
+name: branch-protection
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  administration: write
+
+jobs:
+  protect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply branch protections
+        env:
+          GH_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          gh api \
+            --method PUT \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${GITHUB_REPOSITORY}/branches/main/protection" \
+            -f required_linear_history=true \
+            -f enforce_admins=true \
+            -F required_status_checks='{"strict":true,"checks":[{"context":"pr / check"}]}' \
+            -F restrictions='null' \
+            -F required_pull_request_reviews='{"require_code_owner_reviews":false,"required_approving_review_count":1}'

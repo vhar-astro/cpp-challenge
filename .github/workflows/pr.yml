@@ -1,0 +1,14 @@
+name: pr
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    uses: my-org/cpp-shared-workflows/.github/workflows/build-test.yml@main
+    with:
+      run-tests: true
+      run-format: true
+      profile: linux-gcc
+    secrets: inherit

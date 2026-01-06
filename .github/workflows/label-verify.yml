@@ -1,0 +1,61 @@
+name: label-verify
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize]
+
+jobs:
+  read-version:
+    if: contains(github.event.pull_request.labels.*.name, 'verify')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - id: version
+        run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+  package-dev:
+    needs: read-version
+    if: contains(github.event.pull_request.labels.*.name, 'verify')
+    runs-on: ubuntu-latest
+    env:
+      PACKAGE_VERSION: ${{ needs.read-version.outputs.version }}
+      PR_SHA: ${{ github.event.pull_request.head.sha }}
+      CONAN_REMOTE: ${{ secrets.CONAN_RC_URL }}
+      CONAN_USER: ${{ secrets.CONAN_USERNAME }}
+      CONAN_PASSWORD: ${{ secrets.CONAN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Install Conan
+        uses: turtlebrowser/get-conan@v1.2
+      - name: Create RC package locally
+        run: |
+          echo "${PACKAGE_VERSION}-dev-${PR_SHA::7}" > VERSION
+          conan profile detect --force
+          conan create . --profile:host=conan/profiles/linux-gcc --build=missing -s build_type=Release
+      - name: Upload RC package
+        run: |
+          conan remote add conan-rc "${CONAN_REMOTE}" --force
+          conan remote login conan-rc "${CONAN_USER}" -p "${CONAN_PASSWORD}"
+          conan upload "mylib/${PACKAGE_VERSION}-dev-${PR_SHA::7}" --remote conan-rc --all --confirm
+      - id: ref
+        run: echo "value=mylib/${PACKAGE_VERSION}-dev-${PR_SHA::7}" >> "$GITHUB_OUTPUT"
+    outputs:
+      package-ref: ${{ steps.ref.outputs.value }}
+
+  verify:
+    needs: [read-version, package-dev]
+    if: contains(github.event.pull_request.labels.*.name, 'verify')
+    uses: my-org/cpp-shared-workflows/.github/workflows/integration-test.yml@main
+    with:
+      package-ref: ${{ needs.package-dev.outputs.package-ref }}
+      profile: linux-gcc
+      conan-remote-rc: ${{ secrets.CONAN_RC_URL }}
+    secrets:
+      conan-username: ${{ secrets.CONAN_USERNAME }}
+      conan-password: ${{ secrets.CONAN_PASSWORD }}
