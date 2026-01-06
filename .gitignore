@@ -1,0 +1,12 @@
+# Build artifacts
+build/
+CMakeUserPresets.json
+
+# Conan
+conan.lock
+*.tgz
+
+# Editors/OS
+.DS_Store
+.idea/
+.vscode/

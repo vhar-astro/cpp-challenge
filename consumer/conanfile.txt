@@ -1,0 +1,10 @@
+[requires]
+# Version injected by CI in the workflow when running verify label steps
+mylib/0.0.0
+
+[generators]
+CMakeDeps
+CMakeToolchain
+
+[layout]
+cmake_layout

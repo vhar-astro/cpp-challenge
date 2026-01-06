@@ -1,0 +1,75 @@
+name: reusable-publish-conan
+
+on:
+  workflow_call:
+    inputs:
+      package-version:
+        required: true
+        type: string
+      package-suffix:
+        required: false
+        type: string
+        default: ""
+      profile:
+        required: true
+        type: string
+      conan-remote:
+        required: true
+        type: string
+      upload-remote-name:
+        required: true
+        type: string
+      build-type:
+        required: false
+        type: string
+        default: Release
+      run-tests:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      conan-username:
+        required: true
+      conan-password:
+        required: true
+jobs:
+  publish:
+    runs-on: ${{ inputs.profile == 'windows-msvc' && 'windows-latest' || inputs.profile == 'macos-clang' && 'macos-latest' || 'ubuntu-latest' }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      PACKAGE_VERSION: ${{ inputs.package-version }}
+      PACKAGE_SUFFIX: ${{ inputs.package-suffix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Conan
+        uses: turtlebrowser/get-conan@v1.2
+
+      - name: Authenticate Conan
+        run: |
+          conan remote add ${{ inputs.upload-remote-name }} "${{ inputs.conan-remote }}" --force
+          conan remote login ${{ inputs.upload-remote-name }} "${{ secrets.conan-username }}" -p "${{ secrets.conan-password }}"
+
+      - name: Inject dev version
+        if: ${{ inputs.package-suffix != '' }}
+        run: echo "${PACKAGE_VERSION}${PACKAGE_SUFFIX}" > VERSION
+
+      - name: Configure profile
+        run: conan profile detect --force
+
+      - name: Export recipe
+        run: conan export . --version="$(cat VERSION)"
+
+      - name: Create package
+        run: |
+          conan create . --profile:host=conan/profiles/${{ inputs.profile }} --build=missing -s build_type=${{ inputs.build-type }}
+
+      - name: Upload package
+        run: |
+          conan upload "mylib/$(cat VERSION)" --remote ${{ inputs.upload-remote-name }} --all --confirm
+
+      - name: Optional tests
+        if: ${{ inputs.run-tests }}
+        run: conan test test_package mylib/$(cat VERSION)

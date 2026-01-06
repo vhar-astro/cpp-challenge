@@ -1,0 +1,46 @@
+name: reusable-consumer-integration
+
+on:
+  workflow_call:
+    inputs:
+      package-ref:
+        required: true
+        type: string
+      profile:
+        required: true
+        type: string
+      conan-remote-rc:
+        required: true
+        type: string
+    secrets:
+      conan-username:
+        required: true
+      conan-password:
+        required: true
+jobs:
+  integration:
+    runs-on: ${{ inputs.profile == 'windows-msvc' && 'windows-latest' || inputs.profile == 'macos-clang' && 'macos-latest' || 'ubuntu-latest' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Conan
+        uses: turtlebrowser/get-conan@v1.2
+      - name: Authenticate Conan
+        run: |
+          conan remote add conan-rc "${{ inputs.conan-remote-rc }}" --force
+          conan remote login conan-rc "${{ secrets.conan-username }}" -p "${{ secrets.conan-password }}"
+      - name: Build consumer
+        working-directory: consumer
+        run: |
+          python - <<'PY'
+from pathlib import Path
+path = Path("conanfile.txt")
+data = path.read_text()
+path.write_text(data.replace("mylib/0.0.0", "${{ inputs.package-ref }}"))
+PY
+          conan install . --profile:host=../conan/profiles/${{ inputs.profile }} --build=missing -s build_type=Release
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+          ctest --test-dir build --output-on-failure --config Release

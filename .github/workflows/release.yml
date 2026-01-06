@@ -1,0 +1,63 @@
+name: release
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: read
+
+jobs:
+  conditions:
+    if: github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'publish')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+      - id: version
+        run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: conditions
+    if: needs.conditions.outputs.version != ''
+    strategy:
+      matrix:
+        profile: [linux-gcc, macos-clang, windows-msvc]
+    uses: my-org/cpp-shared-workflows/.github/workflows/publish-conan.yml@main
+    with:
+      package-version: ${{ needs.conditions.outputs.version }}
+      profile: ${{ matrix.profile }}
+      conan-remote: ${{ secrets.CONAN_STABLE_URL }}
+      upload-remote-name: conan-stable
+    secrets:
+      conan-username: ${{ secrets.CONAN_USERNAME }}
+      conan-password: ${{ secrets.CONAN_PASSWORD }}
+
+  tag-and-release:
+    needs: [conditions, publish]
+    if: needs.conditions.outputs.version != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create tag
+        run: |
+          git config user.name "ci-bot"
+          git config user.email "ci@example.com"
+          git tag -a "v${{ needs.conditions.outputs.version }}" ${{ github.event.pull_request.merge_commit_sha }} -m "Release v${{ needs.conditions.outputs.version }}"
+          git push origin "v${{ needs.conditions.outputs.version }}"
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.conditions.outputs.version }}
+          name: v${{ needs.conditions.outputs.version }}
+          body: |
+            Automated release for version ${{ needs.conditions.outputs.version }}.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

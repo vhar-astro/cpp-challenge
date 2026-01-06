@@ -1,0 +1,71 @@
+name: reusable-build-and-test
+
+on:
+  workflow_call:
+    inputs:
+      run-tests:
+        required: true
+        type: boolean
+      run-format:
+        required: true
+        type: boolean
+      profile:
+        required: true
+        type: string
+      conan-remote-rc:
+        required: false
+        type: string
+      build-type:
+        required: false
+        type: string
+        default: Release
+    secrets:
+      conan-username:
+        required: false
+      conan-password:
+        required: false
+jobs:
+  build:
+    runs-on: ${{ inputs.profile == 'windows-msvc' && 'windows-latest' || inputs.profile == 'macos-clang' && 'macos-latest' || 'ubuntu-latest' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Conan
+        uses: turtlebrowser/get-conan@v1.2
+
+      - name: Resolve dependencies
+        run: |
+          conan profile detect --force
+          conan install . --build=missing --profile:host=conan/profiles/${{ inputs.profile }} -s build_type=${{ inputs.build-type }}
+
+      - name: Install clang-format
+        if: ${{ inputs.run-format }}
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            choco install -y llvm
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            brew update
+            brew install clang-format
+          else
+            sudo apt-get update
+            sudo apt-get install -y clang-format
+          fi
+
+      - name: Check formatting
+        if: ${{ inputs.run-format }}
+        run: scripts/run_clang_format.sh
+
+      - name: Configure (CMake)
+        run: |
+          TOOLCHAIN=build/${{ inputs.build-type }}/generators/conan_toolchain.cmake
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ inputs.build-type }} -DCMAKE_TOOLCHAIN_FILE=$TOOLCHAIN
+
+      - name: Build
+        run: cmake --build build --config ${{ inputs.build-type }}
+
+      - name: Run tests
+        if: ${{ inputs.run-tests }}
+        run: ctest --test-dir build --output-on-failure --config ${{ inputs.build-type }}
