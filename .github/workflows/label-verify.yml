@@ -19,7 +19,11 @@ jobs:
 
   package-dev:
     needs: read-version
-    if: contains(github.event.pull_request.labels.*.name, 'verify')
+    # Only run with secrets when the PR originates from the same repository to avoid
+    # executing untrusted fork code with sensitive credentials.
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'verify') &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
       PACKAGE_VERSION: ${{ needs.read-version.outputs.version }}
@@ -50,7 +54,9 @@ jobs:
 
   verify:
     needs: [read-version, package-dev]
-    if: contains(github.event.pull_request.labels.*.name, 'verify')
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'verify') &&
+      github.event.pull_request.head.repo.full_name == github.repository
     uses: my-org/cpp-shared-workflows/.github/workflows/integration-test.yml@main
     with:
       package-ref: ${{ needs.package-dev.outputs.package-ref }}
